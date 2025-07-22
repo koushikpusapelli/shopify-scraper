@@ -24,10 +24,14 @@ Base.metadata.create_all(bind=engine)
 
 class URLRequest(BaseModel):
     website_url: str
+from fastapi.responses import RedirectResponse
 
 @app.get("/")
-def read_root():
-    return {"message": "Hello, Shopify Scraper!"}
+def root():
+    return RedirectResponse(url="/docs")
+#@app.get("/")
+#def read_root():
+ #   return {"message": "Hello, Shopify Scraper!"}
 
 def get_llm_analysis(data, competitors=None):
     """
