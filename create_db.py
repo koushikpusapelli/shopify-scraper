@@ -1,4 +1,4 @@
-import os
+"""import os
 from dotenv import load_dotenv
 import mysql.connector
 
@@ -25,3 +25,4 @@ def create_database():
 
 if __name__ == "__main__":
     create_database()
+"""
