@@ -73,7 +73,21 @@ async def fetch_insights(request: URLRequest):
             raise HTTPException(status_code=401, detail="Invalid Shopify website or inaccessible.")
 
         # Store main brand
-        store = db.query(ShopifyStore).filter(ShopifyStore.website_url == request.website_url).first()
+       import json
+
+store = ShopifyStore(
+    website_url=request.website_url,
+    brand_name=data.get("brand_name"),
+    product_catalog=json.dumps(data.get("product_catalog")),
+    hero_products=json.dumps(data.get("hero_products")),
+    policies=json.dumps(data.get("policies")),
+    faqs=json.dumps(data.get("faqs")),
+    social_handles=json.dumps(data.get("social_handles")),
+    contact_details=json.dumps(data.get("contact_details")),
+    brand_about=data.get("brand_about"),
+    important_links=json.dumps(data.get("important_links")),
+)
+
         if store:
             for key, value in data.items():
                 setattr(store, key, value)
