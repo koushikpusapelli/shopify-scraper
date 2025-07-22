@@ -1,10 +1,33 @@
-
-import google.generativeai as genai
 import os
+import json
+import requests
+import re
+import sqlalchemy.exc
+import google.generativeai as genai
 from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+from services.scraper import scrape_shopify_store
+from models.db_models import ShopifyStore, Base
+from database.connection import SessionLocal, engine
+
+# Load environment variables
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
+
+app = FastAPI()
+
+# Create tables if not exist
+Base.metadata.create_all(bind=engine)
+
+class URLRequest(BaseModel):
+    website_url: str
+
+@app.get("/")
+def read_root():
+    return {"message": "Hello, Shopify Scraper!"}
 
 def get_llm_analysis(data, competitors=None):
     """
@@ -26,43 +49,17 @@ Competitors Data:
     except Exception as e:
         return f"LLM analysis failed: {str(e)}"
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from services.scraper import scrape_shopify_store
-import requests
-import re
 def get_competitor_urls(brand_url):
     """
-    Simple web search for Shopify competitors using Bing search API or scraping a public list.
-    For demo, we'll scrape from a public list and filter out the input brand.
+    Scrape from public list of top Shopify stores, exclude the input brand.
     """
     try:
-        # Example: Scrape from webinopoly's top 100 Shopify stores
         resp = requests.get("https://webinopoly.com/blogs/news/top-100-most-successful-shopify-stores", timeout=10)
         urls = re.findall(r'https?://[\w.-]+', resp.text)
-        # Remove duplicates and the input brand
         urls = list(set([u.rstrip('/') for u in urls if brand_url not in u]))
-        # Return top 3 for demo
-        return urls[:3]
+        return urls[:3]  # Return top 3
     except Exception:
         return []
-from models.db_models import ShopifyStore, Base
-from database.connection import SessionLocal, engine
-import sqlalchemy.exc
-
-app = FastAPI()
-
-# Create tables if they don't exist
-Base.metadata.create_all(bind=engine)
-
-@app.get("/")
-def read_root():
-    return {"message": "Hello, Shopify Scraper!"}
-
-class URLRequest(BaseModel):
-    website_url: str
-
-
 
 @app.post("/fetch_insights")
 async def fetch_insights(request: URLRequest):
@@ -72,41 +69,49 @@ async def fetch_insights(request: URLRequest):
         if data is None:
             raise HTTPException(status_code=401, detail="Invalid Shopify website or inaccessible.")
 
-        # Store main brand
-       import json
+        # Serialize JSON-compatible fields
+        store_data = ShopifyStore(
+            website_url=request.website_url,
+            brand_name=data.get("brand_name"),
+            product_catalog=json.dumps(data.get("product_catalog")),
+            hero_products=json.dumps(data.get("hero_products")),
+            policies=json.dumps(data.get("policies")),
+            faqs=json.dumps(data.get("faqs")),
+            social_handles=json.dumps(data.get("social_handles")),
+            contact_details=json.dumps(data.get("contact_details")),
+            brand_about=data.get("brand_about"),
+            important_links=json.dumps(data.get("important_links")),
+        )
 
-store = ShopifyStore(
-    website_url=request.website_url,
-    brand_name=data.get("brand_name"),
-    product_catalog=json.dumps(data.get("product_catalog")),
-    hero_products=json.dumps(data.get("hero_products")),
-    policies=json.dumps(data.get("policies")),
-    faqs=json.dumps(data.get("faqs")),
-    social_handles=json.dumps(data.get("social_handles")),
-    contact_details=json.dumps(data.get("contact_details")),
-    brand_about=data.get("brand_about"),
-    important_links=json.dumps(data.get("important_links")),
-)
-
-        if store:
-            for key, value in data.items():
-                setattr(store, key, value)
+        # Check if brand already exists
+        existing = db.query(ShopifyStore).filter(ShopifyStore.website_url == request.website_url).first()
+        if existing:
+            for key, value in store_data.__dict__.items():
+                if key != "_sa_instance_state":
+                    setattr(existing, key, value)
         else:
-            store = ShopifyStore(website_url=request.website_url, **data)
-            db.add(store)
-        db.commit()
-        db.refresh(store)
+            db.add(store_data)
 
-        # BONUS: Get competitors and their insights
+        # Process competitors
         competitors = []
         for comp_url in get_competitor_urls(request.website_url):
             comp_data = scrape_shopify_store(comp_url)
             if comp_data:
                 competitors.append({"website_url": comp_url, **comp_data})
-                # Store competitor in DB if not exists
-                comp_store = db.query(ShopifyStore).filter(ShopifyStore.website_url == comp_url).first()
-                if not comp_store:
-                    db.add(ShopifyStore(website_url=comp_url, **comp_data))
+                comp_existing = db.query(ShopifyStore).filter(ShopifyStore.website_url == comp_url).first()
+                if not comp_existing:
+                    db.add(ShopifyStore(
+                        website_url=comp_url,
+                        brand_name=comp_data.get("brand_name"),
+                        product_catalog=json.dumps(comp_data.get("product_catalog")),
+                        hero_products=json.dumps(comp_data.get("hero_products")),
+                        policies=json.dumps(comp_data.get("policies")),
+                        faqs=json.dumps(comp_data.get("faqs")),
+                        social_handles=json.dumps(comp_data.get("social_handles")),
+                        contact_details=json.dumps(comp_data.get("contact_details")),
+                        brand_about=comp_data.get("brand_about"),
+                        important_links=json.dumps(comp_data.get("important_links")),
+                    ))
         db.commit()
 
         llm_analysis = get_llm_analysis(data, competitors)
@@ -115,6 +120,7 @@ store = ShopifyStore(
             "brand": data,
             "competitors": competitors
         }
+
     except sqlalchemy.exc.SQLAlchemyError as db_err:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"DB Error: {str(db_err)}")
@@ -124,11 +130,8 @@ store = ShopifyStore(
     finally:
         db.close()
 
-
-import os
-import uvicorn
-
+# Entry point for Render
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
 
