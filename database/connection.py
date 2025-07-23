@@ -3,6 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
+
 load_dotenv()
 
 MYSQL_USER = os.getenv("MYSQL_USER", "root")
@@ -15,3 +16,8 @@ DATABASE_URL = f"mysql+mysqlconnector://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOS
 
 engine = create_engine(DATABASE_URL, echo=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine = create_engine(
+    DATABASE_URL,
+    echo=True,
+    pool_pre_ping=True  # ✅ Add this to fix OperationalError
+)
