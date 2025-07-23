@@ -20,6 +20,10 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI()
+@app.post("/fetch_insights")
+async def fetch_insights(request: URLRequest):
+    print("Received request for:", request.website_url)
+    ...
 
 # Create tables if not exist
 Base.metadata.create_all(bind=engine)
