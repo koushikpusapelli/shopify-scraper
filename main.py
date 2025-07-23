@@ -13,6 +13,9 @@ from pydantic import BaseModel
 from services.scraper import scrape_shopify_store
 from models.db_models import ShopifyStore, Base
 from database.connection import SessionLocal, engine
+from fastapi import FastAPI
+
+app = FastAPI()
 
 # Load environment variables
 load_dotenv()
